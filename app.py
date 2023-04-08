@@ -9,7 +9,9 @@ from fastapi.encoders import jsonable_encoder
 import uvicorn
 from starlette.responses import JSONResponse
 
+from src.features.preprocess import clean_code
 from utils import load_bert, load_mlp, load_faiss
+from validate import Submission
 
 logger = logging.getLogger()
 handler = logging.StreamHandler(sys.stdout)
@@ -26,6 +28,8 @@ mlp = None
 bert_transform = None
 faiss_index = None
 keys_df = None
+pwt_df = None
+merged_df = None
 
 
 @app.get("/")
@@ -49,28 +53,46 @@ def set_up():
     logger.info("FAISS loaded successfully")
     logger.info("Loading keys dataframe")
     global keys_df
-    keys_df = pd.read_csv("data/external/codeforces-problems/keys_df.csv")
+    keys_df = pd.read_csv("data/external/keys_df.csv")
+    logger.info("Keys loaded successfully")
+    logger.info("Loading problems dataframe")
+    global pwt_df
+    pwt_df = pd.read_csv("data/external/codeforces-problems.csv", index_col=0)
+    pwt_df["problem_url"] = pwt_df["problem_url"].apply(lambda x: x.replace("contests", "contest"))
+    pwt_df['problem_tags'] = pwt_df['problem_tags'].astype(str)
+    logger.info("Problems loaded successfully")
+    logger.info("Merging data")
+    global merged_df
+    merged_df = pd.merge(keys_df, pwt_df, how="left", on='problem_url')
+    logger.info("Merged data successfully")
 
 
 @app.post("/get_similar")
-def get_similar(request):
-    code = request.code
+async def get_similar(submission: Submission):
+    sub_dict = submission.dict()
+    source_code = sub_dict["source_code"]
+    cleaned_code = clean_code(source_code)
     logger.info("Code has been extracted")
     try:
-        emb = mlp(bert_transform(code))
+        emb = mlp(bert_transform(cleaned_code[0]))
         res = faiss_index.search(emb.detach().numpy().reshape(-1, 256), k=40)
-    except Exception:
+    except Exception as e:
+        logger.error(e)
         raise HTTPException(
             status_code=500,
             detail="Something went wrong"
         )
     logger.info("Recommendation successful")
-    return [keys_df.problem_url[i] for i in res]
+    return [{"problem_url": f"{keys_df.problem_url[i]}",
+             "tags": merged_df.problem_tags[i].split(",") if str(merged_df.problem_tags[i]) != "nan" else [],
+             "rating": merged_df.rating[i] if str(merged_df.rating[i]) != "nan" else 0
+             }
+            for i in res[1][0]]
 
 
 @app.get("/health")
 def health():
-    if mlp is None or bert_transform is None or faiss_index is None or keys_df is None:
+    if mlp is None or bert_transform is None or faiss_index is None or keys_df is None or pwt_df is None or merged_df is None:
         raise HTTPException(
             status_code=500,
             detail="Entities undefined"

@@ -28,5 +28,5 @@ def load_mlp():
 
 
 def load_faiss():
-    faiss_index = faiss.read_index("models/task_index_median_MLP256_03-04-23.bin")
+    faiss_index = faiss.read_index("data/external/task_index_median_MLP256_03-04-23.bin")
     return faiss_index
