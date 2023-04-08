@@ -30,6 +30,7 @@ faiss_index = None
 keys_df = None
 pwt_df = None
 merged_df = None
+rating_eps = 0.4
 
 
 @app.get("/")
@@ -72,22 +73,41 @@ async def get_similar(submission: Submission):
     sub_dict = submission.dict()
     source_code = sub_dict["source_code"]
     cleaned_code = clean_code(source_code)
-    logger.info("Code has been extracted")
+    logger.info("Code has been extracted and cleaned")
+    problem_url = sub_dict["problem_url"]
+    difficulty = sub_dict["difficulty"]
+    n_recs = sub_dict["n_recs"]
+    rating = sub_dict["rating"]
     try:
         emb = mlp(bert_transform(cleaned_code[0]))
-        res = faiss_index.search(emb.detach().numpy().reshape(-1, 256), k=40)
+        res = faiss_index.search(emb.detach().numpy().reshape(-1, 256), k=500)
     except Exception as e:
         logger.error(e)
         raise HTTPException(
             status_code=500,
             detail="Something went wrong"
         )
-    logger.info("Recommendation successful")
-    return [{"problem_url": f"{keys_df.problem_url[i]}",
-             "tags": merged_df.problem_tags[i].split(",") if str(merged_df.problem_tags[i]) != "nan" else [],
-             "rating": merged_df.rating[i] if str(merged_df.rating[i]) != "nan" else 0
-             }
-            for i in res[1][0]]
+    logger.info("Recommendation successful. Filtering...")
+    to_filter = res[1][0]
+    global rating_eps
+    response = []
+
+    for i in to_filter:
+        if keys_df.problem_url[i] == problem_url:
+            continue
+        if rating * (1 - rating_eps) <= merged_df.rating[i] <= rating + 100 and difficulty == 0 or \
+                rating - 100 <= merged_df.rating[i] <= rating * (1 + rating_eps) and difficulty == 2 or \
+                rating * (1 - rating_eps) <= merged_df.rating[i] <= rating * (1 + rating_eps) and difficulty == 1:
+            response.append(
+                {
+                    "problem_url": f"{keys_df.problem_url[i]}",
+                    "rating": merged_df.rating[i] if str(merged_df.rating[i]) != "nan" else 0
+                }
+            )
+            if len(response) == n_recs:
+                break
+
+    return response
 
 
 @app.get("/health")
