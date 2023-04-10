@@ -1,6 +1,7 @@
-FROM python:3.10-slim
+FROM pytorch/pytorch:latest
 
-COPY . /home/app/
-WORKDIR /home/app
-RUN pip install --no-cache-dir -r requirements.txt && python src/data/get_data.py
-CMD ["python", "app.py"]
+COPY ./ /app
+WORKDIR /app
+RUN pip install -r /app/requirements.txt --no-cache-dir
+RUN python /app/src/data/get_data.py
+CMD python app.py

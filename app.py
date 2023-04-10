@@ -58,9 +58,7 @@ def set_up():
     logger.info("Keys loaded successfully")
     logger.info("Loading problems dataframe")
     global pwt_df
-    pwt_df = pd.read_csv("data/external/codeforces-problems.csv", index_col=0)
-    pwt_df["problem_url"] = pwt_df["problem_url"].apply(lambda x: x.replace("contests", "contest"))
-    pwt_df['problem_tags'] = pwt_df['problem_tags'].astype(str)
+    pwt_df = pd.read_csv("data/external/final_df.csv", index_col=0)
     logger.info("Problems loaded successfully")
     logger.info("Merging data")
     global merged_df
@@ -102,7 +100,7 @@ async def get_similar(submission: Submission):
                 {
                     "problem_url": f"{keys_df.problem_url[i]}",
                     "rating": merged_df.rating[i] if str(merged_df.rating[i]) != "nan" else 0,
-                    "tags": merged_df.problem_tags[i]
+                    "tags": merged_df.tags[i]
                 }
             )
             if len(response) == n_recs:
@@ -125,4 +123,4 @@ def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=9000)
+    uvicorn.run(app, host="0.0.0.0", port=9000)
