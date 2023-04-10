@@ -11,7 +11,7 @@ jobs:
         with:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: 1/3 ${{ .github.repository }} start!
+          message: 1/3 ${{ github.repository }} start!
 
   build:
     #    if: .github.ref == 'refs/heads/dev'
@@ -37,7 +37,7 @@ jobs:
         with:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: 2/3 ${{ .github.repository }} build done!
+          message: 2/3 ${{ github.repository }} build done!
 
   deploy:
     name: Deploy
