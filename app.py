@@ -101,7 +101,8 @@ async def get_similar(submission: Submission):
             response.append(
                 {
                     "problem_url": f"{keys_df.problem_url[i]}",
-                    "rating": merged_df.rating[i] if str(merged_df.rating[i]) != "nan" else 0
+                    "rating": merged_df.rating[i] if str(merged_df.rating[i]) != "nan" else 0,
+                    "tags": merged_df.problem_tags[i]
                 }
             )
             if len(response) == n_recs:
