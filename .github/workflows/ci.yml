@@ -22,10 +22,10 @@ jobs:
       - name: Login to DockerHub Registry
         run: echo ${{ secrets.DOCKERHUB_PASSWORD }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
 
-      - name: Build Docker image back
+      - name: Build Docker image ml
         run: docker build -f=Dockerfile -t yutfut/ml:${GITHUB_SHA::8} .
 
-      - name: Push the image bcak
+      - name: Push the image ml
         run: docker push yutfut/ml:${GITHUB_SHA::8}
 
   send_message_2:
@@ -56,9 +56,7 @@ jobs:
             sudo docker-compose stop
             sudo docker-compose down
             sudo docker rm -f $(sudo docker ps -aq)
-            rm .env.ml
-            touch .env.ml
-            echo VERSION=${GITHUB_SHA::8} >> .env.ml
+            echo VERSION=${GITHUB_SHA::8} >> .env
             sudo docker-compose up -d
 
   send_message_3:
