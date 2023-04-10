@@ -1,10 +1,9 @@
 faiss-cpu
 pandas~=2.0.0
 numpy
-torch~=2.0.0
-opendatasets~=0.1.22
 fastapi~=0.95.0
 transformers~=4.27.4
 uvicorn~=0.21.1
 starlette~=0.26.1
 pydantic~=1.10.7
+gdown~=4.7.1
