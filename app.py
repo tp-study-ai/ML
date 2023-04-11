@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 
 import pandas as pd
@@ -33,7 +32,7 @@ merged_df = None
 rating_eps = 0.4
 
 
-@app.get("/")
+@app.get("/ml/")
 def main():
     return "Welcome to StudyAI ML server!"
 
@@ -66,7 +65,7 @@ def set_up():
     logger.info("Merged data successfully")
 
 
-@app.post("/get_similar")
+@app.post("/ml/get_similar")
 async def get_similar(submission: Submission):
     sub_dict = submission.dict()
     source_code = sub_dict["source_code"]
@@ -109,7 +108,7 @@ async def get_similar(submission: Submission):
     return response
 
 
-@app.get("/health")
+@app.get("/ml/health")
 def health():
     if mlp is None or bert_transform is None or faiss_index is None or keys_df is None or pwt_df is None or merged_df is None:
         raise HTTPException(
