@@ -55,10 +55,13 @@ jobs:
             cd infrastructure/
             sudo docker-compose stop
             sudo docker-compose down
+            df -h
             sudo docker rm -f $(sudo docker ps -aq)
             sudo docker rmi -f $(sudo docker images -a yutfut/ml)
+            df -h
             echo ML_VERSION=${GITHUB_SHA::8} >> .env
             sudo docker-compose up -d
+            df -h
 
   send_message_3:
     runs-on: ubuntu-latest
