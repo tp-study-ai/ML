@@ -31,6 +31,8 @@ pwt_df = None
 merged_df = None
 rating_eps = 0.4
 
+lfm = None
+
 
 @app.get("/ml/")
 def main():
@@ -39,6 +41,8 @@ def main():
 
 @app.on_event("startup")
 def set_up():
+    # Context model
+    logger.info("Setting up context model")
     logger.info(f"Loading codeBERTcpp")
     global bert_transform
     bert_transform = load_bert()
@@ -63,6 +67,11 @@ def set_up():
     global merged_df
     merged_df = pd.merge(keys_df, pwt_df, how="left", on='problem_url')
     logger.info("Merged data successfully")
+
+    # General model
+    logger.info("Setting up general model")
+    global lfm
+    lfm =
 
 
 @app.post("/ml/get_similar")
