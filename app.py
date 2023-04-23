@@ -1,6 +1,8 @@
+import ast
 import logging
 import sys
 
+import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
@@ -9,8 +11,8 @@ import uvicorn
 from starlette.responses import JSONResponse
 
 from src.features.preprocess import clean_code
-from utils import load_bert, load_mlp, load_faiss
-from validate import Submission
+from utils import load_bert, load_mlp, load_faiss, load_tags
+from validate import Submission, User
 
 logger = logging.getLogger()
 handler = logging.StreamHandler(sys.stdout)
@@ -29,6 +31,8 @@ faiss_index = None
 keys_df = None
 pwt_df = None
 merged_df = None
+tags_dict = None
+np_vector = None
 rating_eps = 0.4
 
 
@@ -63,6 +67,71 @@ def set_up():
     global merged_df
     merged_df = pd.merge(keys_df, pwt_df, how="left", on='problem_url')
     logger.info("Merged data successfully")
+
+    global tags_dict
+    tags_dict = load_tags()
+    logger.info("Tags loaded successfully")
+
+    global np_vector
+    np_vector = faiss_index.reconstruct_n(0, faiss_index.ntotal)
+
+
+@app.post("/ml/user_heuristic")
+async def user_heuristic(user: User):
+    not_approved_tags = {}
+    approved_tasks = {}
+    not_approved_tasks = []
+
+    user_story = {value["eng"]: [] for value in tags_dict.values()}
+    for problem in user.story:
+        for tag_id in problem.tags:
+            tasks_with_url = merged_df[merged_df["problem_url"] == problem.problem_url].index
+            if len(tasks_with_url) > 0:
+                user_story[tags_dict[str(tag_id)]["eng"]].append(tasks_with_url[0])
+
+    for value in tags_dict.values():
+        cur_tag = value["eng"]
+        if len(user_story[cur_tag]) != 0:
+            # get 0.30 the hardest tasks
+            tr = merged_df.iloc[user_story[cur_tag]].sort_values("rating")
+            thresh_rating = tr.quantile(q=0.7, numeric_only=True).rating
+            indexes = tr[tr.rating >= thresh_rating]["rating"].index
+
+            # get 10 nearest tasks with current tag to mean of 0.3 hardest
+            result_indexes = \
+                faiss_index.search(np.stack(tuple(np_vector[i] for i in indexes)).mean(axis=0, keepdims=True),
+                                   k=100)[1]
+            res_df = merged_df.iloc[result_indexes[0]]
+            res_df = res_df[res_df.tags.str.contains(cur_tag.replace("*", "")) & (res_df.rating >= thresh_rating)][
+                     :10]
+        else:
+            thresh_rating = 0
+            res_df = merged_df[merged_df.tags.str.contains(cur_tag.replace("*", "")).fillna(False)].sort_values(
+                "rating")[:10]
+        for i in res_df.index:
+            tags_i = ast.literal_eval(res_df["tags"][i])
+            is_approve = True
+            for tag in tags_i:
+                if tag != cur_tag:
+                    tag_df = merged_df.iloc[user_story[tag]].sort_values("rating")
+                    if not merged_df["rating"][i] < \
+                           tag_df[tag_df.rating > tag_df.quantile(q=0.7, numeric_only=True).rating][
+                               "rating"].median() + 300:
+                        is_approve = False
+                        if tag not in not_approved_tags:
+                            not_approved_tags[tag] = 1
+                        else:
+                            not_approved_tags[tag] += 1
+            if is_approve:
+                if res_df.rating[i] > thresh_rating and i not in user_story[cur_tag]:
+                    if tag not in approved_tasks:
+                        approved_tasks[tag] = [i]
+                    else:
+                        approved_tasks[tag].append(i)
+            else:
+                not_approved_tasks.append(i)
+
+    return approved_tasks
 
 
 @app.post("/ml/get_similar")

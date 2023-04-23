@@ -1,3 +1,5 @@
+import json
+
 import torch
 from transformers import AutoTokenizer, AutoModel
 import faiss
@@ -30,3 +32,9 @@ def load_mlp():
 def load_faiss():
     faiss_index = faiss.read_index("data/external/task_index_median_MLP256_03-04-23.bin")
     return faiss_index
+
+
+def load_tags():
+    with open("data/external/id2tags.json", "r") as f:
+        tags_dict = json.load(f)
+    return tags_dict
