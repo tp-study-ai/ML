@@ -53,3 +53,14 @@ pattern:
 └── tox.ini            <- tox file with settings for running tox; see tox.readthedocs.io
 ```
 
+## Build
+
+```bash
+docker build --rm -t recsys-context:0.0.1 .
+```
+
+## Run
+
+```bash
+docker run --rm --shm-size=1G -p 9000:9000 recsys-context:0.0.1
+```
