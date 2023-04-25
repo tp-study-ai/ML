@@ -2,17 +2,20 @@ import ast
 import logging
 import sys
 
+import faiss
+import numpy
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+import torch.nn
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.encoders import jsonable_encoder
 
 import uvicorn
 from starlette.responses import JSONResponse
 
 from src.features.preprocess import clean_code
-from utils import load_bert, load_mlp, load_faiss, load_tags
-from validate import Submission, User
+from utils import load_bert, load_mlp, load_faiss, load_tags, load_tags2id
+from validate import Submission, User, UserHeuristicResponse, ProblemResponse
 
 logger = logging.getLogger()
 handler = logging.StreamHandler(sys.stdout)
@@ -31,8 +34,9 @@ faiss_index = None
 keys_df = None
 pwt_df = None
 merged_df = None
-tags_dict = None
+id2tags = None
 np_vector = None
+tags2id = None
 rating_eps = 0.4
 
 
@@ -43,53 +47,72 @@ def main():
 
 @app.on_event("startup")
 def set_up():
-    logger.info(f"Loading codeBERTcpp")
-    global bert_transform
-    bert_transform = load_bert()
-    logger.info("BERT loaded successfully")
-    logger.info(f"Loading MLP256")
-    global mlp
-    mlp = load_mlp()
-    logger.info("MLP loaded successfully")
-    logger.info("Loading FAISS")
+    pass
+
+
+def load_data_for_general_recs():
     global faiss_index
-    faiss_index = load_faiss()
-    logger.info("FAISS loaded successfully")
-    logger.info("Loading keys dataframe")
-    global keys_df
-    keys_df = pd.read_csv("data/external/keys_df.csv")
-    logger.info("Keys loaded successfully")
-    logger.info("Loading problems dataframe")
-    global pwt_df
-    pwt_df = pd.read_csv("data/external/final_df.csv", index_col=0)
-    logger.info("Problems loaded successfully")
-    logger.info("Merging data")
-    global merged_df
-    merged_df = pd.merge(keys_df, pwt_df, how="left", on='problem_url')
-    logger.info("Merged data successfully")
-
-    global tags_dict
-    tags_dict = load_tags()
-    logger.info("Tags loaded successfully")
-
+    global id2tags
     global np_vector
-    np_vector = faiss_index.reconstruct_n(0, faiss_index.ntotal)
+    if faiss_index is None:
+        logger.debug("Loading FAISS")
+        faiss_index = load_faiss()
+        logger.debug("FAISS loaded successfully")
+    if id2tags is None:
+        logger.info("Loading tags")
+        id2tags = load_tags()
+        logger.info("Tags loaded successfully")
+    if np_vector is None:
+        np_vector = faiss_index.reconstruct_n(0, faiss_index.ntotal)
+
+    return faiss_index, id2tags, np_vector
 
 
-@app.post("/ml/user_heuristic")
-async def user_heuristic(user: User):
+def load_data_for_context_recs():
+    global keys_df
+    global pwt_df
+    global merged_df
+    global tags2id
+    if keys_df is None:
+        logger.info("Loading keys dataframe")
+        keys_df = pd.read_csv("data/external/keys_df.csv")
+        logger.info("Keys loaded successfully")
+    if pwt_df is None:
+        logger.info("Loading problems dataframe")
+        pwt_df = pd.read_csv("data/external/final_df.csv", index_col=0)
+        logger.info("Problems loaded successfully")
+    if merged_df is None:
+        logger.info("Merging data")
+        merged_df = pd.merge(keys_df, pwt_df, how="left", on='problem_url')
+        logger.info("Merged data successfully")
+    if tags2id is None:
+        logger.info("Loading tags to id")
+        tags2id = load_tags2id()
+        logger.info("Loaded tags2id successfully")
+    return keys_df, merged_df, tags2id
+
+
+@app.post("/ml/user_heuristic", response_model=list[UserHeuristicResponse])
+async def user_heuristic(user: User,
+                         general_data: tuple[faiss.Index, dict, numpy.ndarray] = Depends(load_data_for_general_recs),
+                         context_data: tuple[pd.DataFrame, pd.DataFrame, dict] = Depends(load_data_for_context_recs)
+                         ) -> list[UserHeuristicResponse]:
+    merged_df, tags2id = context_data[1:]
+
+    faiss_index, id2tags, np_vector = general_data
+
     not_approved_tags = {}
     approved_tasks = {}
     not_approved_tasks = []
 
-    user_story = {value["eng"]: [] for value in tags_dict.values()}
+    user_story = {value["eng"]: [] for value in id2tags.values()}
     for problem in user.story:
         for tag_id in problem.tags:
             tasks_with_url = merged_df[merged_df["problem_url"] == problem.problem_url].index
             if len(tasks_with_url) > 0:
-                user_story[tags_dict[str(tag_id)]["eng"]].append(tasks_with_url[0])
+                user_story[id2tags[str(tag_id)]["eng"]].append(tasks_with_url[0])
 
-    for value in tags_dict.values():
+    for value in id2tags.values():
         cur_tag = value["eng"]
         if len(user_story[cur_tag]) != 0:
             # get 0.30 the hardest tasks
@@ -98,9 +121,8 @@ async def user_heuristic(user: User):
             indexes = tr[tr.rating >= thresh_rating]["rating"].index
 
             # get 10 nearest tasks with current tag to mean of 0.3 hardest
-            result_indexes = \
-                faiss_index.search(np.stack(tuple(np_vector[i] for i in indexes)).mean(axis=0, keepdims=True),
-                                   k=100)[1]
+            result_indexes = faiss_index.search(np.stack(tuple(np_vector[i] for i in indexes)
+                                                         ).mean(axis=0, keepdims=True), k=100)[1]
             res_df = merged_df.iloc[result_indexes[0]]
             res_df = res_df[res_df.tags.str.contains(cur_tag.replace("*", "")) & (res_df.rating >= thresh_rating)][
                      :10]
@@ -114,9 +136,8 @@ async def user_heuristic(user: User):
             for tag in tags_i:
                 if tag != cur_tag:
                     tag_df = merged_df.iloc[user_story[tag]].sort_values("rating")
-                    if not merged_df["rating"][i] < \
-                           tag_df[tag_df.rating > tag_df.quantile(q=0.7, numeric_only=True).rating][
-                               "rating"].median() + 300:
+                    if not merged_df["rating"][i] < tag_df[tag_df.rating > tag_df.quantile(q=0.7, numeric_only=True)
+                            .rating]["rating"].median() + 300:
                         is_approve = False
                         if tag not in not_approved_tags:
                             not_approved_tags[tag] = 1
@@ -131,11 +152,77 @@ async def user_heuristic(user: User):
             else:
                 not_approved_tasks.append(i)
 
-    return approved_tasks
+    # return approved_tasks
+    user_heuristic_response = []
+    priority = 1
+    for tag, _ in sorted(not_approved_tags.items(), key=lambda x: x[1]):
+        if tag not in approved_tasks:
+            continue
+        rec_by_tag = {
+            "priority": priority,
+            "recommended_tag": tags2id[tag],
+            "problems": []
+        }
+        for problem_id in approved_tasks[tag]:
+            rec_by_tag["problems"].append(
+                {
+                    "problem_url": merged_df.problem_url.iloc[problem_id],
+                    "rating": merged_df.rating.iloc[problem_id],
+                    "tags": [tags2id[t] for t in eval(merged_df.tags.iloc[problem_id])]
+                }
+            )
+        user_heuristic_response.append(rec_by_tag)
+        approved_tasks.pop(tag)
+        priority += 1
+
+    for tag, problems in approved_tasks.items():
+        rec_by_tag = {
+            "priority": priority,
+            "recommended_tag": tags2id[tag],
+            "problems": []
+        }
+        for problem_id in approved_tasks[tag]:
+            rec_by_tag["problems"].append(
+                {
+                    "problem_url": merged_df.problem_url.iloc[problem_id],
+                    "rating": merged_df.rating.iloc[problem_id],
+                    "tags": [tags2id[t] for t in eval(merged_df.tags.iloc[problem_id])]
+                }
+            )
+        user_heuristic_response.append(rec_by_tag)
+
+    return user_heuristic_response
 
 
-@app.post("/ml/get_similar")
-async def get_similar(submission: Submission):
+def load_models_for_context_recs():
+    global bert_transform
+    global mlp
+    global faiss_index
+    if bert_transform is None:
+        logger.debug(f"Loading codeBERTcpp")
+        bert_transform = load_bert()
+        logger.debug("BERT loaded successfully")
+    if mlp is None:
+        logger.debug(f"Loading MLP256")
+        mlp = load_mlp()
+        logger.debug("MLP loaded successfully")
+    if faiss_index is None:
+        logger.debug("Loading FAISS")
+        faiss_index = load_faiss()
+        logger.debug("FAISS loaded successfully")
+    return bert_transform, mlp, faiss_index
+
+
+@app.post("/ml/get_similar", response_model=list[ProblemResponse])
+async def get_similar(submission: Submission,
+                      models: tuple[torch.nn.Module, torch.nn.Module, faiss.Index] = Depends(
+                          load_models_for_context_recs),
+                      data: tuple[pd.DataFrame, pd.DataFrame, dict] = Depends(load_data_for_context_recs)) -> \
+        list[ProblemResponse]:
+    bert_transform, mlp, faiss_index = models
+
+    keys_df, merged_df, tags2id = data
+
     sub_dict = submission.dict()
     source_code = sub_dict["source_code"]
     cleaned_code = clean_code(source_code)
@@ -144,6 +231,7 @@ async def get_similar(submission: Submission):
     difficulty = sub_dict["difficulty"]
     n_recs = sub_dict["n_recs"]
     rating = sub_dict["rating"]
+
     try:
         emb = mlp(bert_transform(cleaned_code[0]))
         res = faiss_index.search(emb.detach().numpy().reshape(-1, 256), k=500)
@@ -155,7 +243,6 @@ async def get_similar(submission: Submission):
         )
     logger.info("Recommendation successful. Filtering...")
     to_filter = res[1][0]
-    global rating_eps
     response = []
 
     for i in to_filter:
@@ -168,7 +255,7 @@ async def get_similar(submission: Submission):
                 {
                     "problem_url": f"{keys_df.problem_url[i]}",
                     "rating": merged_df.rating[i] if str(merged_df.rating[i]) != "nan" else 0,
-                    "tags": merged_df.tags[i]
+                    "tags": [tags2id[tag] for tag in eval(merged_df.tags[i])]
                 }
             )
             if len(response) == n_recs:

@@ -56,11 +56,11 @@ pattern:
 ## Build
 
 ```bash
-docker build --rm -t recsys-context:0.0.1 .
+docker build --rm -t study-ai-ml:0.0.2 .
 ```
 
 ## Run
 
 ```bash
-docker run --rm --shm-size=1G -p 9000:9000 recsys-context:0.0.1
+docker run --rm --shm-size=1G -p 9000:9000 study-ai-ml:0.0.2
 ```

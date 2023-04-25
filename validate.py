@@ -25,3 +25,15 @@ class Problem(BaseModel):
 class User(BaseModel):
     username: str
     story: list[Problem] = Field(description="List of problems the user has solved")
+
+
+class ProblemResponse(BaseModel):
+    problem_url: str = Field(description="URL of the problem")
+    rating: int = Field(default=0, ge=0, le=3500, description="Rating of the problem")
+    tags: list[int] = Field(unique_items=True, description="List of tags")
+
+
+class UserHeuristicResponse(BaseModel):
+    recommended_tag: int = Field(ge=1, le=37, description="Tag by what the task is recommended")
+    priority: int = Field(ge=1, le=37, description="Priority of tasks by this recommended tag")
+    problems: list[ProblemResponse] = Field(..., description="List of problems with this recommended tag")
