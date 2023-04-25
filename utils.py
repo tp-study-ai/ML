@@ -38,3 +38,8 @@ def load_tags():
     with open("data/external/id2tags.json", "r") as f:
         tags_dict = json.load(f)
     return tags_dict
+
+def load_tags2id():
+    with open("data/external/tags2id.json", "r") as f:
+        tags2id = json.load(f)
+    return tags2id
