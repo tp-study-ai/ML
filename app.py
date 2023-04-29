@@ -47,7 +47,9 @@ def main():
 
 @app.on_event("startup")
 def set_up():
-    pass
+    load_data_for_general_recs()
+    load_data_for_context_recs()
+    load_models_for_context_recs()
 
 
 def load_data_for_general_recs():
@@ -107,10 +109,15 @@ async def user_heuristic(user: User,
 
     user_story = {value["eng"]: [] for value in id2tags.values()}
     for problem in user.story:
-        for tag_id in problem.tags:
+        if problem.difficulty_match < 0 or problem.solved:
+            for tag_id in problem.tags:
+                tasks_with_url = merged_df[merged_df["problem_url"] == problem.problem_url].index
+                if len(tasks_with_url) > 0:
+                    user_story[id2tags[str(tag_id)]["eng"]].append(tasks_with_url[0])
+        elif problem.difficulty_match > 0 and not problem.solved:
             tasks_with_url = merged_df[merged_df["problem_url"] == problem.problem_url].index
             if len(tasks_with_url) > 0:
-                user_story[id2tags[str(tag_id)]["eng"]].append(tasks_with_url[0])
+                not_approved_tasks.extend(list(tasks_with_url))
 
     for value in id2tags.values():
         cur_tag = value["eng"]
@@ -131,6 +138,8 @@ async def user_heuristic(user: User,
             res_df = merged_df[merged_df.tags.str.contains(cur_tag.replace("*", "")).fillna(False)].sort_values(
                 "rating")[:10]
         for i in res_df.index:
+            if i in not_approved_tasks:  # User already marked this task as "too hard"
+                continue
             tags_i = ast.literal_eval(res_df["tags"][i])
             is_approve = True
             for tag in tags_i:
