@@ -16,15 +16,13 @@ class Problem(BaseModel):
     problem_url: str = Field(description="URL of the problem")
     rating: int = Field(default=0, ge=0, le=3500, description="Rating of the problem")
     tags: list[int] = Field(unique_items=True, description="List of tags")
-    difficulty_match: Optional[int] = Field(default=0, ge=-1, le=1,
-                                            description="-1 if too easy, 1 if too hard, 0 if unmarked")
-    solved: Optional[bool] = Field(default=False, description="Whether the user has solved the problem")
     n_attempts: Optional[int] = Field(default=0, ge=0, description="Number of attempts to solve the problem")
 
 
-class User(BaseModel):
-    username: str
-    story: list[Problem] = Field(description="List of problems the user has solved")
+class UserStory(BaseModel):
+    solved: list[Problem] = Field(default=[], description="List of problems the user has solved")
+    too_easy: list[Problem] = Field(default=[], description="List of problems the user has marked as too easy")
+    too_hard: list[Problem] = Field(default=[], description="List of problems the user has marked as too hard")
 
 
 class ProblemResponse(BaseModel):
@@ -37,3 +35,11 @@ class UserHeuristicResponse(BaseModel):
     recommended_tag: int = Field(ge=1, le=37, description="Tag by what the task is recommended")
     priority: int = Field(ge=1, le=37, description="Priority of tasks by this recommended tag")
     problems: list[ProblemResponse] = Field(..., description="List of problems with this recommended tag")
+
+
+class ColdStartResponse(BaseModel):
+    problem_url: str = Field(description="Problem recommended to be solved")
+    tag: int = Field(ge=1, le=37, description="TagID by what the task is recommended")
+    progress: dict[int, bool] = Field(description="TagID: Done | Not done for each tag we want to fill")
+    problem_tags: list[int] = Field(unique_items=True, description="List of tags of the recommended problem")
+    rating: int = Field(default=0, ge=0, le=3500, description="Rating of the recommended problem")

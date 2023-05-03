@@ -3,3 +3,6 @@ venv/
 
 # Downloadable data
 data/
+
+# Non-production code
+notebooks/
