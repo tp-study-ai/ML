@@ -14,8 +14,8 @@ import uvicorn
 from starlette.responses import JSONResponse
 
 from src.features.preprocess import clean_code
-from utils import load_bert, load_mlp, load_faiss, load_tags, load_tags2id
-from validate import Submission, User, UserHeuristicResponse, ProblemResponse
+from utils import load_bert, load_mlp, load_faiss, load_tags, load_tags2id, sample_task, get_task_quantile
+from validate import Submission, UserStory, UserHeuristicResponse, ProblemResponse, ColdStartResponse
 
 logger = logging.getLogger()
 handler = logging.StreamHandler(sys.stdout)
@@ -37,6 +37,7 @@ merged_df = None
 id2tags = None
 np_vector = None
 tags2id = None
+db_df = None
 rating_eps = 0.4
 
 
@@ -94,8 +95,183 @@ def load_data_for_context_recs():
     return keys_df, merged_df, tags2id
 
 
+def load_data_for_cold_start():
+    global db_df
+    if db_df is None:
+        logger.info("Loading db dataframe")
+        db_df = pd.read_csv("data/processed/problems_small.csv", converters={"tags": ast.literal_eval,
+                                                                                 "tag_ids": ast.literal_eval})
+        logger.info("Db loaded successfully")
+    return db_df
+
+
+@app.post("/ml/cold_start", response_model=ColdStartResponse)
+async def cold_start(user_story: UserStory,
+                     db_df: pd.DataFrame = Depends(load_data_for_cold_start)) -> ColdStartResponse:
+    tags_priority = ["implementation", "greedy", "math", "graphs", 'dp', "strings", "data structures", "sortings",
+                     "brute force", "constructive algorithms"]
+
+    solved_tasks = {i: [] for i in range(1, 38)}  # Dicts mapping each task to all of its tags
+    too_hard_tasks = {i: [] for i in range(1, 38)}
+    too_easy_tasks = {i: [] for i in range(1, 38)}
+    n_attempts = {}
+
+    # Fill the dicts
+    for task in user_story.solved:
+        found = db_df[db_df.problem_url == task.problem_url]
+        if len(found) == 0:
+            continue
+        n_attempts[found.index[0]] = task.n_attempts
+        for tag in task.tags:
+            if tag not in solved_tasks.keys():
+                solved_tasks[tag] = [found.index[0]]
+            solved_tasks[tag].append(found.index[0])
+
+    for task in user_story.too_hard:
+        found = db_df[db_df.problem_url == task.problem_url]
+        if len(found) == 0:
+            continue
+        n_attempts[found.index[0]] = task.n_attempts
+        for tag in task.tags:
+            if tag not in too_hard_tasks.keys():
+                too_hard_tasks[tag] = [found.index[0]]
+            too_hard_tasks[tag].append(found.index[0])
+
+    for task in user_story.too_easy:
+        found = db_df[db_df.problem_url == task.problem_url]
+        if len(found) == 0:
+            continue
+        n_attempts[found.index[0]] = task.n_attempts
+        for tag in task.tags:
+            if tag not in too_easy_tasks.keys():
+                too_easy_tasks[tag] = [found.index[0]]
+            too_easy_tasks[tag].append(found.index[0])
+
+    tags_progress = {tags2id[tag]: False for tag in tags_priority}
+
+    for tag in tags_priority:
+        logger.info("Checking tag: " + tag)
+        tag_id = tags2id[tag]
+        if len(too_hard_tasks[tag_id]) >= 3:
+            # todo: save current state for this tag
+            tags_progress[tag_id] = True  # TODO @levbara for all cases
+            print(tag, "3 hard")
+            continue
+        tag_done = False
+        for solved_task in solved_tasks[tag_id]:
+            if n_attempts[solved_task] >= 7:
+                tag_done = True
+                break
+        if tag_done:
+            print(tag, "solved")
+            # todo: save current state for this tag
+            tags_progress[tag_id] = True  # TODO @levbara for all cases
+            continue
+        if len(too_hard_tasks[tag_id]) >= 1 and len(solved_tasks[tag_id]) != 0:
+            # todo: save current state for this tag
+            tags_progress[tag_id] = True  # TODO @levbara for all cases
+            print(tag, "hard+solved")
+            continue
+
+        max_skipped_rating = -1
+        max_solved_rating = -1
+        min_hard_rating = -1
+        if len(too_easy_tasks[tag_id]) != 0:
+            id_of_max_skipped_task = db_df.iloc[too_easy_tasks[tag_id]].rating.idxmax()
+            max_skipped_rating = get_task_quantile(id_of_max_skipped_task, tag, db_df)
+        if len(solved_tasks[tag_id]) != 0:
+            id_of_max_solved_task = db_df.iloc[solved_tasks[tag_id]].rating.idxmax()
+            max_solved_rating = get_task_quantile(id_of_max_solved_task, tag, db_df)
+        if len(too_hard_tasks[tag_id]) != 0:
+            id_of_min_hard_task = db_df.iloc[too_hard_tasks[tag_id]].rating.idxmin()
+            min_hard_rating = get_task_quantile(id_of_min_hard_task, tag, db_df)
+
+        tag_df = db_df[db_df.tags.apply(lambda tags: tag in tags)].sort_values(by="rating")
+        if max_solved_rating == -1 and max_skipped_rating == -1:
+            # get < 0.1 rating quantile
+            tag_df["tags_count"] = tag_df.tags.apply(lambda tags: len(tags))
+
+            logger.info("Printing quantiles")
+            logger.info(tag_df.quantile(q=0.1, numeric_only=True).rating)
+            logger.info(tag_df.quantile(q=0.5, numeric_only=True).rating)
+            logger.info(tag_df.quantile(q=0.9, numeric_only=True).rating)
+
+            target_tasks = tag_df[tag_df.rating <= tag_df.quantile(q=0.1, numeric_only=True).rating].sort_values(
+                by="tags_count",
+                ascending=False)
+
+            logger.info(target_tasks.head())
+
+            logger.info("No solved or skipped tasks for tag: " + tag)
+            logger.info("Sampling task for tag: " + tag)
+            
+            problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks, too_easy_tasks)
+
+            return {
+                "problem_url": problem_url,
+                "tag": tag_id,
+                "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
+                "rating": rating,
+                "problem_tags": tag_ids
+            }
+
+        elif max_solved_rating > max_skipped_rating:
+            # get tasks by solved tasks
+            if n_attempts[id_of_max_solved_task] < 4:
+                target_rating = max_solved_rating + (1 - max_solved_rating) / 2
+            else:
+                target_rating = max_solved_rating + (1 - max_solved_rating) / 4
+
+            tag_df["tags_count"] = tag_df.tags.apply(lambda tags: len(tags))
+
+            target_tasks = tag_df[
+                (tag_df.rating <= tag_df.quantile(q=target_rating + 0.02, numeric_only=True).rating) & (
+                        tag_df.rating >= tag_df.quantile(q=target_rating - 0.02,
+                                                         numeric_only=True).rating)].sort_values(
+                by="tags_count", ascending=False)
+
+            problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks,
+                                                       too_easy_tasks)
+
+            return {
+                "problem_url": problem_url,
+                "tag": tag_id,
+                "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
+                "rating": rating,
+                "problem_tags": tag_ids
+            }
+
+        else:
+            # todo: get tasks by skipped tasks
+            if min_hard_rating == -1:
+                # no upper limit
+                target_rating = max_skipped_rating + (1 - max_skipped_rating) / 2
+            else:
+                # with upper limit
+                target_rating = max_skipped_rating + (min_hard_rating - max_skipped_rating) / 2
+
+            tag_df["tags_count"] = tag_df.tags.apply(lambda tags: len(tags))
+
+            target_tasks = tag_df[
+                (tag_df.rating <= tag_df.quantile(q=target_rating + 0.02, numeric_only=True).rating) & (
+                        tag_df.rating >= tag_df.quantile(q=target_rating - 0.02,
+                                                         numeric_only=True).rating)].sort_values(
+                by="tags_count", ascending=False)
+
+            problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks,
+                                                       too_easy_tasks)
+
+            return {
+                "problem_url": problem_url,
+                "tag": tag_id,
+                "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
+                "rating": rating,
+                "problem_tags": tag_ids
+            }
+
+
 @app.post("/ml/user_heuristic", response_model=list[UserHeuristicResponse])
-async def user_heuristic(user: User,
+async def user_heuristic(user: UserStory,
                          general_data: tuple[faiss.Index, dict, numpy.ndarray] = Depends(load_data_for_general_recs),
                          context_data: tuple[pd.DataFrame, pd.DataFrame, dict] = Depends(load_data_for_context_recs)
                          ) -> list[UserHeuristicResponse]:
@@ -108,13 +284,22 @@ async def user_heuristic(user: User,
     not_approved_tasks = []
 
     user_story = {value["eng"]: [] for value in id2tags.values()}
-    for problem in user.story:
-        if problem.difficulty_match < 0 or problem.solved:
+
+    for problem in user.solved:
+        for tag_id in problem.tags:
+            tasks_with_url = merged_df[merged_df["problem_url"] == problem.problem_url].index
+            if len(tasks_with_url) > 0:
+                user_story[id2tags[tag_id]["eng"]].append(tasks_with_url[0])
+
+    for problem in user.too_easy:
+        if problem not in user.solved:
             for tag_id in problem.tags:
                 tasks_with_url = merged_df[merged_df["problem_url"] == problem.problem_url].index
                 if len(tasks_with_url) > 0:
-                    user_story[id2tags[str(tag_id)]["eng"]].append(tasks_with_url[0])
-        elif problem.difficulty_match > 0 and not problem.solved:
+                    user_story[id2tags[tag_id]["eng"]].append(tasks_with_url[0])
+
+    for problem in user.too_hard:
+        if problem not in user.solved:
             tasks_with_url = merged_df[merged_df["problem_url"] == problem.problem_url].index
             if len(tasks_with_url) > 0:
                 not_approved_tasks.extend(list(tasks_with_url))
@@ -143,15 +328,16 @@ async def user_heuristic(user: User,
             tags_i = ast.literal_eval(res_df["tags"][i])
             is_approve = True
             for tag in tags_i:
-                if tag != cur_tag:
-                    tag_df = merged_df.iloc[user_story[tag]].sort_values("rating")
-                    if not merged_df["rating"][i] < tag_df[tag_df.rating > tag_df.quantile(q=0.7, numeric_only=True)
-                            .rating]["rating"].median() + 300:
-                        is_approve = False
-                        if tag not in not_approved_tags:
-                            not_approved_tags[tag] = 1
-                        else:
-                            not_approved_tags[tag] += 1
+                if tag == cur_tag:
+                    continue
+                tag_df = merged_df.iloc[user_story[tag]].sort_values("rating")
+                if not merged_df["rating"][i] < tag_df[tag_df.rating > tag_df.quantile(q=0.7, numeric_only=True)
+                        .rating]["rating"].median() + 300:
+                    is_approve = False
+                    if tag not in not_approved_tags:
+                        not_approved_tags[tag] = 1
+                    else:
+                        not_approved_tags[tag] += 1
             if is_approve:
                 if res_df.rating[i] > thresh_rating and i not in user_story[cur_tag]:
                     if tag not in approved_tasks:

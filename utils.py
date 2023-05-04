@@ -1,4 +1,5 @@
 import json
+import logging
 
 import torch
 from transformers import AutoTokenizer, AutoModel
@@ -37,9 +38,35 @@ def load_faiss():
 def load_tags():
     with open("data/external/id2tags.json", "r") as f:
         tags_dict = json.load(f)
+    tags_dict = {int(k): v for k, v in tags_dict.items()}
     return tags_dict
+
 
 def load_tags2id():
     with open("data/external/tags2id.json", "r") as f:
         tags2id = json.load(f)
     return tags2id
+
+
+# Useful functions for different use cases
+
+def get_task_quantile(task_id, tag, merged_df):
+    tag_df = merged_df[merged_df.tags.apply(lambda tags: tag in tags)].sort_values(by="rating")
+    tag_df.reset_index(drop=False, inplace=True)
+    print(tag_df)
+    return tag_df[tag_df['Unnamed: 0'] == task_id].index[0] / len(tag_df)
+
+
+logger = logging.getLogger()
+
+
+def sample_task(input_df, tag_ids, solved, too_hard, too_easy):
+    for task in input_df.iloc:
+        is_ok = True
+        for tag in tag_ids:
+            logger.info(f"Checking {task['Unnamed: 0']} for {tag}")
+            if task['Unnamed: 0'] in solved[tag] or task['Unnamed: 0'] in too_hard[tag] or task['Unnamed: 0'] in too_easy[tag]:
+                is_ok = False
+                break
+        if is_ok:
+            return task['problem_url'], task['rating'], task['tag_ids']
