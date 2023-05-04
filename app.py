@@ -210,7 +210,7 @@ async def cold_start(user_story: UserStory,
             return {
                 "problem_url": problem_url,
                 "tag": tag_id,
-                "progress": tags_progress,
+                "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
                 "rating": rating,
                 "problem_tags": tag_ids
             }
@@ -236,7 +236,7 @@ async def cold_start(user_story: UserStory,
             return {
                 "problem_url": problem_url,
                 "tag": tag_id,
-                "progress": tags_progress,
+                "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
                 "rating": rating,
                 "problem_tags": tag_ids
             }
@@ -264,7 +264,7 @@ async def cold_start(user_story: UserStory,
             return {
                 "problem_url": problem_url,
                 "tag": tag_id,
-                "progress": tags_progress,
+                "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
                 "rating": rating,
                 "problem_tags": tag_ids
             }

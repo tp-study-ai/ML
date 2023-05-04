@@ -37,9 +37,15 @@ class UserHeuristicResponse(BaseModel):
     problems: list[ProblemResponse] = Field(..., description="List of problems with this recommended tag")
 
 
+class ProgressOnTag(BaseModel):
+    tag: int = Field(ge=1, le=37, description="TagID")
+    done: bool = Field(description="Bool flag. If true, it represents that tag is fulfilled during the cold start")
+
+
 class ColdStartResponse(BaseModel):
     problem_url: str = Field(description="Problem recommended to be solved")
     tag: int = Field(ge=1, le=37, description="TagID by what the task is recommended")
-    progress: dict[int, bool] = Field(description="TagID: Done | Not done for each tag we want to fill")
+    progress: list[ProgressOnTag] = Field(unique_items=True,
+                                          description="list of {ProgressOnTag for each tag we want to fill}")
     problem_tags: list[int] = Field(unique_items=True, description="List of tags of the recommended problem")
     rating: int = Field(default=0, ge=0, le=3500, description="Rating of the recommended problem")
