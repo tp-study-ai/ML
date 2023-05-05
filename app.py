@@ -191,16 +191,9 @@ async def cold_start(user_story: UserStory,
             # get < 0.1 rating quantile
             tag_df["tags_count"] = tag_df.tags.apply(lambda tags: len(tags))
 
-            logger.info("Printing quantiles")
-            logger.info(tag_df.quantile(q=0.1, numeric_only=True).rating)
-            logger.info(tag_df.quantile(q=0.5, numeric_only=True).rating)
-            logger.info(tag_df.quantile(q=0.9, numeric_only=True).rating)
-
             target_tasks = tag_df[tag_df.rating <= tag_df.quantile(q=0.1, numeric_only=True).rating].sort_values(
                 by="tags_count",
                 ascending=False)
-
-            logger.info(target_tasks.head())
 
             logger.info("No solved or skipped tasks for tag: " + tag)
             logger.info("Sampling task for tag: " + tag)
@@ -208,6 +201,7 @@ async def cold_start(user_story: UserStory,
             problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks, too_easy_tasks)
 
             return {
+                "finished": False,
                 "problem_url": problem_url,
                 "tag": tag_id,
                 "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
@@ -225,7 +219,7 @@ async def cold_start(user_story: UserStory,
             tag_df["tags_count"] = tag_df.tags.apply(lambda tags: len(tags))
 
             target_tasks = tag_df[
-                (tag_df.rating <= tag_df.quantile(q=target_rating + 0.02, numeric_only=True).rating) & (
+                (tag_df.rating <= tag_df.quantile(q=min(1, target_rating + 0.02), numeric_only=True).rating) & (
                         tag_df.rating >= tag_df.quantile(q=target_rating - 0.02,
                                                          numeric_only=True).rating)].sort_values(
                 by="tags_count", ascending=False)
@@ -234,6 +228,7 @@ async def cold_start(user_story: UserStory,
                                                        too_easy_tasks)
 
             return {
+                "finished": False,
                 "problem_url": problem_url,
                 "tag": tag_id,
                 "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
@@ -253,7 +248,7 @@ async def cold_start(user_story: UserStory,
             tag_df["tags_count"] = tag_df.tags.apply(lambda tags: len(tags))
 
             target_tasks = tag_df[
-                (tag_df.rating <= tag_df.quantile(q=target_rating + 0.02, numeric_only=True).rating) & (
+                (tag_df.rating <= tag_df.quantile(q=min(1, target_rating + 0.02), numeric_only=True).rating) & (
                         tag_df.rating >= tag_df.quantile(q=target_rating - 0.02,
                                                          numeric_only=True).rating)].sort_values(
                 by="tags_count", ascending=False)
@@ -262,12 +257,22 @@ async def cold_start(user_story: UserStory,
                                                        too_easy_tasks)
 
             return {
+                "finished": False,
                 "problem_url": problem_url,
                 "tag": tag_id,
                 "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
                 "rating": rating,
                 "problem_tags": tag_ids
             }
+
+    return {
+        "finished": True,
+        "problem_url": "",
+        "tag": 1,
+        "progress": [{"tag": tag, "done": status} for tag, status in tags_progress.items()],
+        "rating": 0,
+        "problem_tags": []
+    }
 
 
 @app.post("/ml/user_heuristic", response_model=list[UserHeuristicResponse])
