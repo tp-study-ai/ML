@@ -43,6 +43,7 @@ class ProgressOnTag(BaseModel):
 
 
 class ColdStartResponse(BaseModel):
+    finished: bool = Field(description="Bool flag. If true, it represents that cold start is finished")
     problem_url: str = Field(description="Problem recommended to be solved")
     tag: int = Field(ge=1, le=37, description="TagID by what the task is recommended")
     progress: list[ProgressOnTag] = Field(unique_items=True,
