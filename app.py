@@ -7,7 +7,7 @@ import numpy
 import numpy as np
 import pandas as pd
 import torch.nn
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.encoders import jsonable_encoder
 
 import uvicorn
