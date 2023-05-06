@@ -9,4 +9,5 @@ if __name__ == "__main__":
                           output="data/external")
     gdown.download_folder("https://drive.google.com/drive/folders/1J_Dwtiw3jTO083wqpk_FIln049X6t-j6", quiet=True,
                           output="data/processed")
+    os.mkdir("models")
     os.system("mv data/external/MLP256_last.pth models/")

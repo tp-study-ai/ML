@@ -3,6 +3,7 @@ venv/
 
 # Downloadable data
 data/
+models/
 
 # Non-production code
 notebooks/
