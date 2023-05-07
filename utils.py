@@ -59,23 +59,27 @@ def get_task_quantile(task_id, tag, merged_df):
 
 logger = logging.getLogger()
 
+
 def count_needed_tags(tags, i, tags_priority):
     cnt = 0
     for tag in tags:
-        if tag in tags_priority[(i+1):]:
-            cnt+=1
+        if tag in tags_priority[i + 1:]:
+            cnt += 1
     return cnt
+
 
 def sample_task(input_df, tag_ids, solved, too_hard, too_easy, tag_ind, tags_priority):
     input_df["needed_tags_count"] = input_df.tags.apply(lambda tags: count_needed_tags(tags, tag_ind, tags_priority))
     input_df = input_df.sort_values(
-                by="needed_tags_count",
-                ascending=False)
+        by="needed_tags_count",
+        ascending=False
+    )
     for task in input_df.iloc:
         is_ok = True
         for tag in tag_ids:
             logger.info(f"Checking {task['Unnamed: 0']} for {tag}")
-            if task['Unnamed: 0'] in solved[tag] or task['Unnamed: 0'] in too_hard[tag] or task['Unnamed: 0'] in too_easy[tag]:
+            if task['Unnamed: 0'] in solved[tag] or task['Unnamed: 0'] in too_hard[tag] or task['Unnamed: 0'] in \
+                    too_easy[tag]:
                 is_ok = False
                 break
         if is_ok:
