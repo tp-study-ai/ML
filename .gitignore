@@ -133,3 +133,8 @@ dmypy.json
 
 # Kaggle json
 kaggle.json
+
+#data
+data/external/
+data/processed/
+models/

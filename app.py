@@ -149,7 +149,7 @@ async def cold_start(user_story: UserStory,
 
     tags_progress = {tags2id[tag]: False for tag in tags_priority}
 
-    for tag in tags_priority:
+    for i, tag in enumerate(tags_priority):
         logger.info("Checking tag: " + tag)
         tag_id = tags2id[tag]
         if len(too_hard_tasks[tag_id]) >= 3:
@@ -187,18 +187,21 @@ async def cold_start(user_story: UserStory,
             min_hard_rating = get_task_quantile(id_of_min_hard_task, tag, db_df)
 
         tag_df = db_df[db_df.tags.apply(lambda tags: tag in tags)].sort_values(by="rating")
+        if min_hard_rating != -1 and max(max_skipped_rating, max_solved_rating) > min_hard_rating:
+            tags_progress[tag_id] = True
+            print(tag, "hard > skipped/solved")
+            continue
+
         if max_solved_rating == -1 and max_skipped_rating == -1:
             # get < 0.1 rating quantile
             tag_df["tags_count"] = tag_df.tags.apply(lambda tags: len(tags))
 
-            target_tasks = tag_df[tag_df.rating <= tag_df.quantile(q=0.1, numeric_only=True).rating].sort_values(
-                by="tags_count",
-                ascending=False)
+            target_tasks = tag_df[tag_df.rating <= tag_df.quantile(q=0.1, numeric_only=True).rating]
 
             logger.info("No solved or skipped tasks for tag: " + tag)
             logger.info("Sampling task for tag: " + tag)
             
-            problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks, too_easy_tasks)
+            problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks, too_easy_tasks, i, tags_priority)
 
             return {
                 "finished": False,
@@ -221,11 +224,10 @@ async def cold_start(user_story: UserStory,
             target_tasks = tag_df[
                 (tag_df.rating <= tag_df.quantile(q=min(1, target_rating + 0.02), numeric_only=True).rating) & (
                         tag_df.rating >= tag_df.quantile(q=target_rating - 0.02,
-                                                         numeric_only=True).rating)].sort_values(
-                by="tags_count", ascending=False)
+                                                         numeric_only=True).rating)]
 
             problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks,
-                                                       too_easy_tasks)
+                                                       too_easy_tasks, i, tags_priority)
 
             return {
                 "finished": False,
@@ -250,11 +252,10 @@ async def cold_start(user_story: UserStory,
             target_tasks = tag_df[
                 (tag_df.rating <= tag_df.quantile(q=min(1, target_rating + 0.02), numeric_only=True).rating) & (
                         tag_df.rating >= tag_df.quantile(q=target_rating - 0.02,
-                                                         numeric_only=True).rating)].sort_values(
-                by="tags_count", ascending=False)
+                                                         numeric_only=True).rating)]
 
             problem_url, rating, tag_ids = sample_task(target_tasks, id2tags.keys(), solved_tasks, too_hard_tasks,
-                                                       too_easy_tasks)
+                                                       too_easy_tasks, i, tags_priority)
 
             return {
                 "finished": False,
